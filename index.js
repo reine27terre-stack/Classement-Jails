@@ -4,7 +4,15 @@
  */
 
 require('dotenv').config();
+const http = require('http');
 const { Client } = require('discord.js-selfbot-v13');
+
+// Mini serveur HTTP pour l'offre gratuite Web Service de Render.com
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot Shibuya Stats - En ligne 24/7\n');
+}).listen(PORT, () => console.log(`🌐 Serveur Web de santé démarré sur le port ${PORT}`));
 
 // Configuration du Bot et des Identifiants
 const CONFIG = {
