@@ -347,8 +347,23 @@ client.on('ready', async () => {
     console.log('🟢 Bot prêt — Classement en direct actif');
 });
 
-/* ===================== LIVE ===================== */
+/* ===================== DEBUG COMMAND ===================== */
 client.on('messageCreate', async (msg) => {
+    // Commande /debug : force le repost du classement (uniquement le compte selfbot)
+    if (msg.author.id === client.user.id && msg.content.trim().toLowerCase() === '/debug') {
+        console.log('🔧 Commande /debug reçue — repost forcé du classement...');
+        // Supprimer le message /debug pour garder le salon propre
+        await msg.delete().catch(() => {});
+        // Réinitialiser l'ID pour forcer la création d'un nouveau message
+        rankMessageId = null;
+        saveRankMessageId(null);
+        // Repost avec les stats actuelles
+        await updateRankMessage();
+        console.log('✅ Classement reposté via /debug');
+        return;
+    }
+
+    /* ===================== LIVE ===================== */
     if (msg.channel.id !== CONFIG.CHANNEL_ID) return;
 
     const rolesGuild = client.guilds.cache.get(CONFIG.ROLES_GUILD_ID) || client.guilds.cache.get(CONFIG.GUILD_ID);
