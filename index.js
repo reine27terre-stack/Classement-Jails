@@ -327,7 +327,11 @@ client.on('ready', async () => {
     console.log(`🤖 Connecté en tant que ${client.user.tag}`);
 
     const channel = await client.channels.fetch(CONFIG.CHANNEL_ID).catch(() => null);
-    const rolesGuild = client.guilds.cache.get(CONFIG.ROLES_GUILD_ID) || client.guilds.cache.get(CONFIG.GUILD_ID);
+
+    // Fetch explicite du serveur pour s'assurer que les membres et rôles sont accessibles
+    const guildId = CONFIG.ROLES_GUILD_ID || CONFIG.GUILD_ID;
+    const rolesGuild = await client.guilds.fetch(guildId).catch(() => null)
+        || client.guilds.cache.get(guildId);
 
     if (!channel) {
         console.log('❌ Configuration invalide : Salon de logs introuvable.');
@@ -335,7 +339,9 @@ client.on('ready', async () => {
     }
 
     if (!rolesGuild) {
-        console.log('⚠️ Avertissement : Serveur des rôles introuvable dans le cache du client.');
+        console.log('⚠️ Avertissement : Serveur des rôles introuvable — les compteurs de gestions resteront à 0.');
+    } else {
+        console.log(`✅ Serveur des rôles chargé : ${rolesGuild.name}`);
     }
 
     await scan(channel, rolesGuild);
