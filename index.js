@@ -385,19 +385,32 @@ client.on('ready', async () => {
     console.log('🟢 Bot prêt — Classement en direct actif');
 });
 
-/* ===================== DEBUG COMMAND ===================== */
+/* ===================== COMMANDS ===================== */
 client.on('messageCreate', async (msg) => {
+    const content = msg.content.trim().toLowerCase();
+
     // Commande /debug : force le repost du classement (uniquement le compte selfbot)
-    if (msg.author.id === client.user.id && msg.content.trim().toLowerCase() === '/debug') {
+    if (msg.author.id === client.user.id && content === '/debug') {
         console.log('🔧 Commande /debug reçue — repost forcé du classement...');
-        // Supprimer le message /debug pour garder le salon propre
+        await msg.delete().catch(() => { });
+        rankMessageId = null;
+        saveRankMessageId(null);
+        await updateRankMessage();
+        console.log('✅ Classement reposté via /debug');
+        return;
+    }
+
+    // Commande +classement : force le repost du classement (accessible à tous)
+    if (content === '+classement') {
+        console.log(`🔧 Commande +classement reçue par ${msg.author.tag} — repost forcé...`);
+        // Supprimer le message de commande pour garder le salon propre
         await msg.delete().catch(() => { });
         // Réinitialiser l'ID pour forcer la création d'un nouveau message
         rankMessageId = null;
         saveRankMessageId(null);
         // Repost avec les stats actuelles
         await updateRankMessage();
-        console.log('✅ Classement reposté via /debug');
+        console.log('✅ Classement reposté via +classement');
         return;
     }
 
