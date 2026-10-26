@@ -27,7 +27,7 @@ const CONFIG = {
         GSE: process.env.ROLE_GSE,
         GM: process.env.ROLE_GM,
         GS: process.env.ROLE_GS,
-        ADS: process.env.ROLE_ADS,
+        GSS: process.env.ROLE_GSS,
         GAC: process.env.ROLE_GAC
     }
 };
@@ -40,12 +40,12 @@ const ROLE_NAMES = {
     GAC: 'Gestion Activité',
     GM: 'Gestion Modération',
     GS: 'Gestion Staff',
-    ADS: 'Gestion ADS'
+    GSS: 'Gestion Sécurité'
 };
 
 const stats = {
     users: new Map(),
-    roles: { GAP: 0, GSE: 0, GM: 0, GS: 0, ADS: 0, GAC: 0 },
+    roles: { GAP: 0, GSE: 0, GM: 0, GS: 0, GSS: 0, GAC: 0 },
     total: 0,
     cache: new Map(),
     processed: new Set()
@@ -61,23 +61,31 @@ function loadRankMessageId() {
             const data = JSON.parse(fs.readFileSync(RANK_FILE, 'utf8'));
             return data.rankMessageId || null;
         }
-    } catch (e) {}
+    } catch (e) { }
     return null;
 }
 
 function saveRankMessageId(id) {
     try {
         fs.writeFileSync(RANK_FILE, JSON.stringify({ rankMessageId: id }), 'utf8');
-    } catch (e) {}
+    } catch (e) { }
 }
 
 let rankMessageId = loadRankMessageId();
 
 /* ===================== UTILS ===================== */
 async function getMember(id, guild) {
+    if (!guild) return null;
     if (stats.cache.has(id)) return stats.cache.get(id);
-    const m = await guild.members.fetch(id).catch(() => null);
-    if (m) stats.cache.set(id, m);
+    const m = await guild.members.fetch({ user: id, force: true }).catch((err) => {
+        console.error(`⚠️ Impossible de fetch le membre ${id} sur le serveur ${guild.name}:`, err.message);
+        return null;
+    });
+    if (m) {
+        stats.cache.set(id, m);
+    } else {
+        console.log(`⚠️ Membre ${id} non trouvé sur le serveur ${guild.name}`);
+    }
     return m;
 }
 
@@ -109,7 +117,7 @@ async function handleMessage(msg, guild) {
     } else if (desc.includes('libéré') || desc.includes('libere') || desc.includes('jaillé') || desc.includes('jail') || desc.includes('unjail')) {
         action = 1;
     }
-    
+
     if (!action) return;
 
     const member = await getMember(id, guild);
@@ -136,11 +144,16 @@ async function handleMessage(msg, guild) {
     stats.total += action;
 
     if (member) {
+        let roleFound = false;
         for (const [role, roleId] of Object.entries(CONFIG.ROLES)) {
             if (roleId && member.roles.cache.has(roleId)) {
                 stats.roles[role] += action;
+                roleFound = true;
                 break;
             }
+        }
+        if (!roleFound) {
+            console.log(`ℹ️ Membre ${member.user?.tag || id} trouvé mais n'a aucun des rôles configurés. Ses rôles: ${[...member.roles.cache.keys()].join(', ')}`);
         }
     }
 }
@@ -298,7 +311,7 @@ function scheduleMidnightReset() {
 
         // 2. Réinitialiser les compteurs
         stats.users.clear();
-        stats.roles = { GAP: 0, GSE: 0, GM: 0, GS: 0, ADS: 0, GAC: 0 };
+        stats.roles = { GAP: 0, GSE: 0, GM: 0, GS: 0, GSS: 0, GAC: 0 };
         stats.total = 0;
         stats.cache.clear();
         stats.processed.clear();
@@ -341,7 +354,7 @@ client.on('ready', async () => {
     if (!rolesGuild) {
         console.log('⚠️ Avertissement : Serveur des rôles introuvable — les compteurs de gestions resteront à 0.');
     } else {
-        console.log(`✅ Serveur des rôles chargé : ${rolesGuild.name}`);
+        console.log(`✅ Serveur des rôles chargé : ${rolesGuild.name} (${rolesGuild.id})`);
     }
 
     await scan(channel, rolesGuild);
@@ -359,7 +372,7 @@ client.on('messageCreate', async (msg) => {
     if (msg.author.id === client.user.id && msg.content.trim().toLowerCase() === '/debug') {
         console.log('🔧 Commande /debug reçue — repost forcé du classement...');
         // Supprimer le message /debug pour garder le salon propre
-        await msg.delete().catch(() => {});
+        await msg.delete().catch(() => { });
         // Réinitialiser l'ID pour forcer la création d'un nouveau message
         rankMessageId = null;
         saveRankMessageId(null);
