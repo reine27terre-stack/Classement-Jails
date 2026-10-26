@@ -21,6 +21,7 @@ const CONFIG = {
     GUILD_ID: process.env.GUILD_ID, // Serveur où se trouve le salon de logs
     ROLES_GUILD_ID: process.env.ROLES_GUILD_ID || process.env.GUILD_ID, // Serveur où se trouvent les rôles Staff
     WEBHOOK_URL: process.env.WEBHOOK_URL,
+    GSS_WEBHOOK_URL: 'https://discord.com/api/webhooks/1564323221917016204/frIDxLVniplw9OhAJR6Z_b-PkPWwwsOpkvYKLc6kK2FZwLHceEEED_TkIq_VXf6JKvi1',
     PING_ROLE_ID: process.env.PING_ROLE_ID || '1540491025045266525',
     ROLES: {
         GAP: process.env.ROLE_GAP,
@@ -55,23 +56,25 @@ const fs = require('fs');
 const path = require('path');
 const RANK_FILE = path.join(__dirname, 'rank_message.json');
 
-function loadRankMessageId() {
+function loadRankData() {
     try {
         if (fs.existsSync(RANK_FILE)) {
-            const data = JSON.parse(fs.readFileSync(RANK_FILE, 'utf8'));
-            return data.rankMessageId || null;
+            return JSON.parse(fs.readFileSync(RANK_FILE, 'utf8'));
         }
     } catch (e) { }
-    return null;
+    return {};
 }
 
-function saveRankMessageId(id) {
+function saveRankData(data) {
     try {
-        fs.writeFileSync(RANK_FILE, JSON.stringify({ rankMessageId: id }), 'utf8');
+        const current = loadRankData();
+        fs.writeFileSync(RANK_FILE, JSON.stringify({ ...current, ...data }), 'utf8');
     } catch (e) { }
 }
 
-let rankMessageId = loadRankMessageId();
+const _initialData = loadRankData();
+let rankMessageId = _initialData.rankMessageId || null;
+let gssMessageId = _initialData.gssMessageId || null;
 
 /* ===================== UTILS ===================== */
 async function getMember(id, guild) {
@@ -133,15 +136,35 @@ async function handleMessage(msg, guild) {
     const member = await getMember(id, guild);
 
     if (!stats.users.has(id)) {
+        // Déterminer le rôle du membre dès le premier enregistrement
+        let memberRole = null;
+        if (member) {
+            for (const [role, roleId] of Object.entries(CONFIG.ROLES)) {
+                if (roleId && member.roles.cache.has(roleId)) {
+                    memberRole = role;
+                    break;
+                }
+            }
+        }
         stats.users.set(id, {
             tag: member ? member.user.tag : id,
             lib: 0,
             rec: 0,
-            total: 0
+            total: 0,
+            role: memberRole
         });
     }
 
     const u = stats.users.get(id);
+    // Mettre à jour le rôle si non défini
+    if (!u.role && member) {
+        for (const [role, roleId] of Object.entries(CONFIG.ROLES)) {
+            if (roleId && member.roles.cache.has(roleId)) {
+                u.role = role;
+                break;
+            }
+        }
+    }
 
     if (action === 2) {
         u.lib++;
@@ -265,6 +288,66 @@ function buildPayload(isFinal = false) {
     };
 }
 
+/* ===================== EMBED GSS ===================== */
+function buildGSSPayload(isFinal = false) {
+    // Filtrer uniquement les membres GSS
+    const gssUsers = [...stats.users.entries()]
+        .filter(([, u]) => u.role === 'GSS')
+        .sort((a, b) => {
+            if (b[1].total !== a[1].total) return b[1].total - a[1].total;
+            return b[1].rec - a[1].rec;
+        })
+        .slice(0, 5);
+
+    const medals = [
+        '👑 CHAMPION',
+        '💎 VICE-CHAMPION',
+        '🔥 TROISIÈME',
+        '⚡ 4ÈME PLACE',
+        '✨ 5ÈME PLACE'
+    ];
+
+    let description = '';
+
+    if (gssUsers.length === 0) {
+        description = '*Aucune action GSS enregistrée pour le moment.*\n\n';
+    } else {
+        gssUsers.forEach(([id, u], i) => {
+            description += `**${medals[i]}**\n`;
+            description += `└ <@${id}>\n`;
+            description += `> **${u.total}** actions\n`;
+            description += `> ${u.lib} unjails • ${u.rec} grabs\n\n`;
+        });
+    }
+
+    const gssAllUsers = [...stats.users.entries()].filter(([, u]) => u.role === 'GSS').map(([, u]) => u);
+    const totalLib = gssAllUsers.reduce((a, b) => a + b.lib, 0);
+    const totalRec = gssAllUsers.reduce((a, b) => a + b.rec, 0);
+    const totalActions = gssAllUsers.reduce((a, b) => a + b.total, 0);
+    const participants = gssAllUsers.length;
+    const avg = participants > 0 ? (totalActions / participants).toFixed(1) : '0.0';
+
+    description += `────────────────────\n`;
+    description += `📌 **${totalLib}** unjails • **${totalRec}** grabs\n`;
+    description += `👥 **${participants}** participants • 📊 **${avg}** moy/pers\n`;
+
+    const contentText = isFinal
+        ? '🔒 **TOP GSS CLÔTURÉ**'
+        : '🛡️ **TOP GESTION SÉCURITÉ**';
+
+    return {
+        content: contentText,
+        embeds: [{
+            description: description,
+            color: isFinal ? 0xffd700 : 0x5865f2,
+            footer: {
+                text: isFinal ? 'Shibuya • Classement GSS définitif clôturé à 00:00' : 'Shibuya • Classement GSS mis à jour automatiquement'
+            },
+            timestamp: new Date().toISOString()
+        }]
+    };
+}
+
 /* ===================== UPDATE VIA WEBHOOK ===================== */
 async function updateRankMessage(isFinal = false) {
     try {
@@ -303,13 +386,60 @@ async function updateRankMessage(isFinal = false) {
         if (res.ok) {
             const data = await res.json();
             rankMessageId = data.id;
-            saveRankMessageId(rankMessageId);
+            saveRankData({ rankMessageId });
             console.log(`✨ Nouveau message de classement créé (ID: ${rankMessageId})`);
         } else {
             console.log('❌ Erreur webhook :', await res.text());
         }
     } catch (err) {
         console.error('❌ Erreur update classement :', err.message);
+    }
+}
+
+/* ===================== UPDATE GSS VIA WEBHOOK ===================== */
+async function updateGSSRankMessage(isFinal = false) {
+    try {
+        const payload = buildGSSPayload(isFinal);
+        const gssCount = [...stats.users.values()].filter(u => u.role === 'GSS').length;
+        console.log(`🛡️ GSS Stats → participants: ${gssCount}, gssMessageId: ${gssMessageId}`);
+
+        if (gssMessageId) {
+            const res = await fetch(`${CONFIG.GSS_WEBHOOK_URL}/messages/${gssMessageId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            console.log(`🔁 PATCH GSS webhook → HTTP ${res.status}`);
+
+            if (res.ok) {
+                console.log(isFinal ? '🏆 Classement GSS final clôturé !' : '✅ Classement GSS mis à jour');
+                return;
+            } else {
+                const errText = await res.text();
+                console.log(`⚠️ PATCH GSS échoué (${res.status}) : ${errText} — tentative de création d'un nouveau message GSS...`);
+                gssMessageId = null;
+            }
+        }
+
+        const res = await fetch(CONFIG.GSS_WEBHOOK_URL + '?wait=true', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        console.log(`📨 POST GSS webhook → HTTP ${res.status}`);
+
+        if (res.ok) {
+            const data = await res.json();
+            gssMessageId = data.id;
+            saveRankData({ gssMessageId });
+            console.log(`✨ Nouveau message de classement GSS créé (ID: ${gssMessageId})`);
+        } else {
+            console.log('❌ Erreur GSS webhook :', await res.text());
+        }
+    } catch (err) {
+        console.error('❌ Erreur update classement GSS :', err.message);
     }
 }
 
@@ -327,6 +457,7 @@ function scheduleMidnightReset() {
 
         // 1. Clôturer et pinger le rôle sur le dernier classement de la journée écoulée
         await updateRankMessage(true);
+        await updateGSSRankMessage(true);
 
         // 2. Réinitialiser les compteurs
         stats.users.clear();
@@ -337,10 +468,12 @@ function scheduleMidnightReset() {
 
         // 3. Réinitialiser l'ID du message pour créer un nouveau classement le jour suivant
         rankMessageId = null;
-        saveRankMessageId(null);
+        gssMessageId = null;
+        saveRankData({ rankMessageId: null, gssMessageId: null });
 
         // 4. Poster le nouvel embed vierge pour la nouvelle journée
         await updateRankMessage(false);
+        await updateGSSRankMessage(false);
 
         console.log('✨ Nouveau jour démarré ! Classement réinitialisé.');
 
@@ -378,6 +511,7 @@ client.on('ready', async () => {
 
     await scan(channel, rolesGuild);
     await updateRankMessage();
+    await updateGSSRankMessage();
 
     // Démarrer la planification du reset à minuit
     scheduleMidnightReset();
@@ -394,7 +528,7 @@ client.on('messageCreate', async (msg) => {
         console.log('🔧 Commande /debug reçue — repost forcé du classement...');
         await msg.delete().catch(() => { });
         rankMessageId = null;
-        saveRankMessageId(null);
+        saveRankData({ rankMessageId: null });
         await updateRankMessage();
         console.log('✅ Classement reposté via /debug');
         return;
@@ -407,7 +541,7 @@ client.on('messageCreate', async (msg) => {
         await msg.delete().catch(() => { });
         // Réinitialiser l'ID pour forcer la création d'un nouveau message
         rankMessageId = null;
-        saveRankMessageId(null);
+        saveRankData({ rankMessageId: null });
         // Repost avec les stats actuelles
         await updateRankMessage();
         console.log('✅ Classement reposté via +classement');
@@ -425,6 +559,7 @@ client.on('messageCreate', async (msg) => {
     // Mettre à jour l'embed UNIQUEMENT si une nouvelle action (unjail/jail) a été enregistrée
     if (stats.total > prevTotal) {
         await updateRankMessage();
+        await updateGSSRankMessage();
     }
 });
 
