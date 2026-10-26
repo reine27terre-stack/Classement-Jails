@@ -103,10 +103,16 @@ async function handleMessage(msg, guild) {
     const lineExec = embed.description
         .split('\n')
         .find(l => l.toLowerCase().includes('exécutant'));
-    if (!lineExec) return;
+    if (!lineExec) {
+        console.log(`⏭️ Embed ignoré (pas de ligne 'exécutant') — début desc: ${desc.substring(0, 80)}`);
+        return;
+    }
 
     const match = lineExec.match(/\d{17,20}/);
-    if (!match) return;
+    if (!match) {
+        console.log(`⏭️ Embed ignoré (pas d'ID dans la ligne exécutant) : ${lineExec}`);
+        return;
+    }
 
     const id = match[0];
     let action = 0;
@@ -118,7 +124,11 @@ async function handleMessage(msg, guild) {
         action = 1;
     }
 
-    if (!action) return;
+    if (!action) {
+        console.log(`⏭️ Embed ignoré (aucun mot-clé d'action) — début desc: ${desc.substring(0, 100)}`);
+        return;
+    }
+    console.log(`✔️ Action détectée → id: ${id}, action: ${action}`);
 
     const member = await getMember(id, guild);
 
@@ -259,6 +269,7 @@ function buildPayload(isFinal = false) {
 async function updateRankMessage(isFinal = false) {
     try {
         const payload = buildPayload(isFinal);
+        console.log(`📊 Stats actuelles → total: ${stats.total}, participants: ${stats.users.size}, rankMessageId: ${rankMessageId}`);
 
         if (rankMessageId) {
             // Éditer le message existant via Webhook
@@ -268,9 +279,15 @@ async function updateRankMessage(isFinal = false) {
                 body: JSON.stringify(payload)
             });
 
+            console.log(`🔁 PATCH webhook → HTTP ${res.status}`);
+
             if (res.ok) {
                 console.log(isFinal ? '🏆 Classement final clôturé et ping envoyé !' : '✅ Classement mis à jour');
                 return;
+            } else {
+                const errText = await res.text();
+                console.log(`⚠️ PATCH échoué (${res.status}) : ${errText} — tentative de création d'un nouveau message...`);
+                rankMessageId = null;
             }
         }
 
@@ -281,11 +298,13 @@ async function updateRankMessage(isFinal = false) {
             body: JSON.stringify(payload)
         });
 
+        console.log(`📨 POST webhook → HTTP ${res.status}`);
+
         if (res.ok) {
             const data = await res.json();
             rankMessageId = data.id;
             saveRankMessageId(rankMessageId);
-            console.log('✨ Nouveau message de classement créé');
+            console.log(`✨ Nouveau message de classement créé (ID: ${rankMessageId})`);
         } else {
             console.log('❌ Erreur webhook :', await res.text());
         }
